@@ -130,28 +130,45 @@ const App = () => {
 
   useEffect(() => {
     (async () => {
-      ffmpeg.current = new FFmpeg();
-      ffmpeg.current.on("log", ({ message: msg }) => {
-        console.log(msg);
-        setLogs((prev) => [...prev, msg]);
-      });
-      ffmpeg.current.on("progress", ({ progress }) => {
-        setTip(numerify(progress, "0.0%"));
-      });
-      setTip("ffmpeg static resource loading...");
-      setSpinning(true);
-      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
-      await ffmpeg.current.load({
-        coreURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.js`,
-          "text/javascript"
-        ),
-        wasmURL: await toBlobURL(
-          `${baseURL}/ffmpeg-core.wasm`,
-          "application/wasm"
-        ),
-      });
-      setSpinning(false);
+      try {
+        ffmpeg.current = new FFmpeg();
+        ffmpeg.current.on("log", ({ message: msg }) => {
+          console.log(msg);
+          setLogs((prev) => [...prev, msg]);
+        });
+        ffmpeg.current.on("progress", ({ progress }) => {
+          setTip(numerify(progress, "0.0%"));
+        });
+        setTip("ffmpeg static resource loading...");
+        setSpinning(true);
+        const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+        await ffmpeg.current.load({
+          coreURL: await toBlobURL(
+            `${baseURL}/ffmpeg-core.js`,
+            "text/javascript",
+            ({ received, total }) => {
+              if (total > 0) {
+                setTip(`Loading core... ${Math.round((received / total) * 100)}%`);
+              }
+            }
+          ),
+          wasmURL: await toBlobURL(
+            `${baseURL}/ffmpeg-core.wasm`,
+            "application/wasm",
+            ({ received, total }) => {
+              if (total > 0) {
+                setTip(`Loading wasm... ${Math.round((received / total) * 100)}%`);
+              }
+            }
+          ),
+        });
+        setSpinning(false);
+      } catch (err) {
+        console.error("Failed to load FFmpeg:", err);
+        setTip("Failed to load FFmpeg");
+        setSpinning(false);
+        message.error("Failed to load FFmpeg. Please refresh the page and try again.", 10);
+      }
     })();
   }, []);
 
