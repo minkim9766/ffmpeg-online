@@ -26,7 +26,7 @@ const App = () => {
   const [downloadFileName, setDownloadFileName] = useState("output.mp4");
   const [logs, setLogs] = useState([]);
   const logContainerRef = useRef(null);
-  const ffmpeg = useRef(new FFmpeg());
+  const ffmpeg = useRef(null);
   const currentFSls = useRef([]);
 
   const handleExec = async () => {
@@ -130,6 +130,7 @@ const App = () => {
 
   useEffect(() => {
     (async () => {
+      ffmpeg.current = new FFmpeg();
       ffmpeg.current.on("log", ({ message: msg }) => {
         console.log(msg);
         setLogs((prev) => [...prev, msg]);
