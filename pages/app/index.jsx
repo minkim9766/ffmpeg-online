@@ -1,6 +1,7 @@
 import { Spin, Upload, Input, Button, message } from "antd";
 import { useEffect, useRef, useState } from "react";
-import { createFFmpeg, fetchFile } from "@ffmpeg/ffmpeg";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { InboxOutlined } from "@ant-design/icons";
 import { fileTypeFromBuffer } from "file-type";
 import { Analytics } from "@vercel/analytics/react";
@@ -23,13 +24,16 @@ const App = () => {
   const [name, setName] = useState("input.mp4");
   const [output, setOutput] = useState("output.mp4");
   const [downloadFileName, setDownloadFileName] = useState("output.mp4");
-  const ffmpeg = useRef();
+  const [logs, setLogs] = useState([]);
+  const logContainerRef = useRef(null);
+  const ffmpeg = useRef(null);
   const currentFSls = useRef([]);
 
   const handleExec = async () => {
     if (!file) {
       return;
     }
+    setLogs([]);
     setOutputFiles([]);
     setHref("");
     setDownloadFileName("");
@@ -37,25 +41,24 @@ const App = () => {
       setTip("Loading file into browser");
       setSpinning(true);
       for (const fileItem of fileList) {
-        ffmpeg.current.FS(
-          "writeFile",
-          fileItem.name,
-          await fetchFile(fileItem)
-        );
+        await ffmpeg.current.writeFile(fileItem.name, await fetchFile(fileItem));
       }
-      currentFSls.current = ffmpeg.current.FS("readdir", ".");
+      const currentDir = await ffmpeg.current.listDir(".");
+      currentFSls.current = currentDir.map((entry) => entry.name);
       setTip("start executing the command");
-      await ffmpeg.current.run(
+      await ffmpeg.current.exec([
         ...inputOptions.split(" "),
         name,
         ...outputOptions.split(" "),
-        output
-      );
+        output,
+      ]);
       setSpinning(false);
-      const FSls = ffmpeg.current.FS("readdir", ".");
-      const outputFiles = FSls.filter((i) => !currentFSls.current.includes(i));
+      const FSls = await ffmpeg.current.listDir(".");
+      const outputFiles = FSls.map((entry) => entry.name).filter(
+        (i) => !currentFSls.current.includes(i)
+      );
       if (outputFiles.length === 1) {
-        const data = ffmpeg.current.FS("readFile", outputFiles[0]);
+        const data = await ffmpeg.current.readFile(outputFiles[0]);
         const type = await fileTypeFromBuffer(data.buffer);
 
         const objectURL = URL.createObjectURL(
@@ -69,10 +72,10 @@ const App = () => {
         );
       } else if (outputFiles.length > 1) {
         var zip = new JSZip();
-        outputFiles.forEach((filleName) => {
-          const data = ffmpeg.current.FS("readFile", filleName);
-          zip.file(filleName, data);
-        });
+        for (const fileName of outputFiles) {
+          const data = await ffmpeg.current.readFile(fileName);
+          zip.file(fileName, data);
+        }
         const zipFile = await zip.generateAsync({ type: "blob" });
         const objectURL = URL.createObjectURL(zipFile);
         setHref(objectURL);
@@ -107,7 +110,7 @@ const App = () => {
     const outputFilesData = [];
     for (let filename of filenames) {
       try {
-        const data = ffmpeg.current.FS("readFile", filename);
+        const data = await ffmpeg.current.readFile(filename);
         const type = await fileTypeFromBuffer(data.buffer);
 
         const objectURL = URL.createObjectURL(
@@ -127,20 +130,53 @@ const App = () => {
 
   useEffect(() => {
     (async () => {
-      ffmpeg.current = createFFmpeg({
-        log: true,
-        corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
-      });
-      ffmpeg.current.setProgress(({ ratio }) => {
-        console.log(ratio);
-        setTip(numerify(ratio, "0.0%"));
-      });
-      setTip("ffmpeg static resource loading...");
-      setSpinning(true);
-      await ffmpeg.current.load();
-      setSpinning(false);
+      try {
+        ffmpeg.current = new FFmpeg();
+        ffmpeg.current.on("log", ({ message: msg }) => {
+          console.log(msg);
+          setLogs((prev) => [...prev, msg]);
+        });
+        ffmpeg.current.on("progress", ({ progress }) => {
+          setTip(numerify(progress, "0.0%"));
+        });
+        setTip("ffmpeg static resource loading...");
+        setSpinning(true);
+        const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+        await ffmpeg.current.load({
+          coreURL: await toBlobURL(
+            `${baseURL}/ffmpeg-core.js`,
+            "text/javascript",
+            ({ received, total }) => {
+              if (total > 0) {
+                setTip(`Loading core... ${Math.round((received / total) * 100)}%`);
+              }
+            }
+          ),
+          wasmURL: await toBlobURL(
+            `${baseURL}/ffmpeg-core.wasm`,
+            "application/wasm",
+            ({ received, total }) => {
+              if (total > 0) {
+                setTip(`Loading wasm... ${Math.round((received / total) * 100)}%`);
+              }
+            }
+          ),
+        });
+        setSpinning(false);
+      } catch (err) {
+        console.error("Failed to load FFmpeg:", err);
+        setTip("Failed to load FFmpeg");
+        setSpinning(false);
+        message.error("Failed to load FFmpeg. Please refresh the page and try again.", 10);
+      }
     })();
   }, []);
+
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logs]);
 
   useEffect(() => {
     const { inputOptions, outputOptions, output } = qs.parse(
@@ -228,6 +264,30 @@ const App = () => {
       </Button>
       <br />
       <br />
+      <h4>FFmpeg Logs</h4>
+      <div
+        ref={logContainerRef}
+        style={{
+          backgroundColor: "#1e1e1e",
+          color: "#00ff00",
+          fontFamily: "monospace",
+          fontSize: "12px",
+          padding: "12px",
+          height: "250px",
+          overflowY: "auto",
+          borderRadius: "4px",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          border: "1px solid #333",
+          marginBottom: "16px",
+        }}
+      >
+        {logs.length === 0 ? (
+          <span style={{ color: "#666" }}>Logs will appear here...</span>
+        ) : (
+          logs.map((log, index) => <div key={index}>{log}</div>)
+        )}
+      </div>
       {href && (
         <a href={href} download={downloadFileName}>
           download file

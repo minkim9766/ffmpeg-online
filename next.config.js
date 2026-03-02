@@ -33,11 +33,33 @@ const nextConfig = {
         headers: [
           {
             key: "Cross-Origin-Embedder-Policy",
-            value: "require-corp",
+            value: "credentialless",
           },
           {
             key: "Cross-Origin-Opener-Policy",
             value: "same-origin",
+          },
+        ],
+      },
+      {
+        source: "/app",
+        headers: [
+          {
+            key: "Cross-Origin-Embedder-Policy",
+            value: "credentialless",
+          },
+          {
+            key: "Cross-Origin-Opener-Policy",
+            value: "same-origin",
+          },
+        ],
+      },
+      {
+        source: "/_next/static/:path*",
+        headers: [
+          {
+            key: "Cross-Origin-Resource-Policy",
+            value: "cross-origin",
           },
         ],
       },
@@ -47,7 +69,11 @@ const nextConfig = {
           {
             key: 'Cache-Control',
             value: 'public, max-age=9999999999, must-revalidate',
-          }
+          },
+          {
+            key: "Cross-Origin-Resource-Policy",
+            value: "cross-origin",
+          },
         ],
       },
     ];
